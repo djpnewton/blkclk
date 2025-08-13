@@ -31,7 +31,9 @@ static const char *TAG = "blkclk";
 #endif
 
 TFT_t dev;
-uint16_t *framebuffer = NULL;
+// screen state
+bool screen_on = true;
+TimerHandle_t screen_off_timer = NULL;
 
 static void listSPIFFS(char *path)
 {
@@ -123,6 +125,18 @@ void setup(void)
     lcdInit(&dev, CONFIG_WIDTH, CONFIG_HEIGHT, CONFIG_OFFSETX, CONFIG_OFFSETY);
 }
 
+void screen_off_timer_callback(TimerHandle_t xTimer)
+{
+    ESP_LOGI(TAG, "Screen off timer callback triggered");
+    if (screen_on == true)
+    {
+        ESP_LOGI(TAG, "Turning screen off due to inactivity");
+        lcdBacklightOff(&dev);
+        lcdDisplayOff(&dev);
+        screen_on = false;
+    }
+}
+
 void app_main(void)
 {
     // set font file
@@ -137,6 +151,9 @@ void app_main(void)
     // button states
     bool button1_pressed = false;
     bool button2_pressed = false;
+    // set timer to turn screen off
+    screen_off_timer = xTimerCreate("screen_off_timer", pdMS_TO_TICKS(5000), pdTRUE, NULL, screen_off_timer_callback);
+    xTimerStart(screen_off_timer, 0);
     // setup peripherals
     setup();
     // start main loop
@@ -204,6 +221,16 @@ void app_main(void)
             lcdSetFontUnderLine(&dev, BLACK);
             lcdDrawString(&dev, fx, 0, fontHeight * 2 - 1, ascii, WHITE);
             lcdUnsetFontUnderLine(&dev);
+            // turn screen on
+            if (screen_on == false)
+            {
+                ESP_LOGI(TAG, "Turning screen on");
+                lcdBacklightOn(&dev);
+                lcdDisplayOn(&dev);
+                screen_on = true;
+            }
+            // reset timer
+            xTimerReset(screen_off_timer, 0);
         }
         lcdDrawFinish(&dev);
         // 10 tick delay (100ms)
