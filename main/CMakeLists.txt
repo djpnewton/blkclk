@@ -1,3 +1,3 @@
-idf_component_register(SRCS "main.c"
+idf_component_register(SRCS "pages.c" "wifi.c" "main.c"
                     INCLUDE_DIRS "."
-                    REQUIRES driver spiffs st7789)
+                    REQUIRES driver spiffs esp_wifi nvs_flash st7789)
