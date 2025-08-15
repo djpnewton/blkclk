@@ -10,6 +10,7 @@
 #include "nvs_flash.h"
 
 #include "pages.h"
+#include "button.h"
 
 static const char *TAG = "main";
 
@@ -90,23 +91,6 @@ esp_err_t mountSPIFFS(char *path, char *label, int max_files)
     return ret;
 }
 
-void setup(void)
-{
-    ESP_LOGI(TAG, "Initializing SPIFFS");
-    // Maximum files that could be open at the same time is 7.
-    ESP_ERROR_CHECK(mountSPIFFS("/fonts", "storage1", 7));
-    listSPIFFS("/fonts/");
-
-    // Initialize GPIO for BUTTON1 and BUTTON2
-    // Set BUTTON1/2 as inputs, no pull-up or pull-down resistors
-    // looking at the schematic, these buttons GPIOs are pulled
-    // up to 3v3 and the switch connects them to ground when pressed
-    // https://github.com/Xinyuan-LilyGO/TTGO-T-Display/blob/master/schematic/ESP32-TFT(6-26).pdf
-    ESP_LOGI(TAG, "Initializing GPIO for BUTTON1 and BUTTON2");
-    gpio_set_direction(BUTTON1, GPIO_MODE_INPUT);
-    gpio_set_direction(BUTTON2, GPIO_MODE_INPUT);
-}
-
 void screen_off_timer_callback(TimerHandle_t xTimer)
 {
     ESP_LOGI(TAG, "Screen off timer callback triggered");
@@ -119,18 +103,7 @@ void screen_off_timer_callback(TimerHandle_t xTimer)
     }
 }
 
-void page_set(enum page_id id)
-{
-    if (current_page != id)
-    {
-        xTimerStop(screen_off_timer, 0); // stop screen off timer
-        page_display(id);
-        xTimerReset(screen_off_timer, 0); // reset screen off timer
-        current_page = id;
-    }
-}
-
-void action_button()
+bool screen_on_kick()
 {
     // reset timer
     xTimerReset(screen_off_timer, 0);
@@ -140,16 +113,85 @@ void action_button()
         ESP_LOGI(TAG, "Turning screen on");
         screen_turn_on();
         screen_on = true;
-        return;
+        return true;
+    }
+    return false;
+}
+
+esp_err_t page_set(enum page_id id)
+{
+    esp_err_t res = ESP_OK;
+    if (current_page != id)
+    {
+        xTimerStop(screen_off_timer, 0); // stop screen off timer
+        page_init(id);
+        res = page_display(id);
+        xTimerStart(screen_off_timer, 0); // start screen off timer
+        current_page = id;
+    }
+    return res;
+}
+
+void action_buttons(button_state_t bs)
+{
+    // kick the screen if a button is activated
+    if (bs == BUTTON_1_ACTIVATED || bs == BUTTON_2_ACTIVATED || bs == BUTTON_BOTH_ACTIVATED)
+    {
+        if (screen_on_kick())
+        {
+            // if we turned the screen on dont process the button activation further
+            return;
+        }
     }
     // switch page
-    if (current_page == PAGE_HOME)
+    switch (current_page)
     {
-        page_set(PAGE_WIFI);
-    }
-    else
-    {
+    case PAGE_HOME:
+        if (bs == BUTTON_1_ACTIVATED || bs == BUTTON_2_ACTIVATED)
+        {
+            esp_err_t err = page_set(PAGE_WIFI_SCAN);
+            if (err != ESP_OK)
+            {
+                page_set(PAGE_WIFI_SCAN_FAIL);
+            }
+            else
+            {
+                page_set(PAGE_WIFI_LIST);
+            }
+        }
+        break;
+    case PAGE_WIFI_SCAN:
+        break; // already scanning
+    case PAGE_WIFI_SCAN_FAIL:
         page_set(PAGE_HOME);
+        break;
+    case PAGE_WIFI_LIST:
+        if (bs == BUTTON_BOTH_ACTIVATED)
+        {
+            enum page_action_t action = page_action(current_page);
+            switch (action)
+            {
+            case PAGE_ACTION_NONE:
+                break;
+            case PAGE_ACTION_EXIT:
+                page_set(PAGE_HOME);
+                break;
+            default:
+                ESP_LOGE(TAG, "Unknown page action result: %d", action);
+                break;
+            }
+        }
+        else if (bs == BUTTON_1_ACTIVATED)
+        {
+            page_down(current_page);
+        }
+        else if (bs == BUTTON_2_ACTIVATED)
+        {
+            page_up(current_page);
+        }
+        break;
+    default:
+        ESP_LOGE(TAG, "Unknown page ID");
     }
 }
 
@@ -165,54 +207,23 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
     // pages init
     pages_init();
-    // setup peripherals
-    setup();
-    // button states
-    bool button1_pressed = false;
-    bool button2_pressed = false;
+    // setup SPIFFS
+    ESP_LOGI(TAG, "Initializing SPIFFS");
+    // Maximum files that could be open at the same time is 7.
+    ESP_ERROR_CHECK(mountSPIFFS("/fonts", "storage1", 7));
+    listSPIFFS("/fonts/");
+    // init buttons
+    ESP_LOGI(TAG, "Initializing buttons");
+    button_init();
     // set timer to turn screen off
     screen_off_timer = xTimerCreate("screen_off_timer", pdMS_TO_TICKS(60000), pdTRUE, NULL, screen_off_timer_callback);
     xTimerStart(screen_off_timer, 0);
     // start main loop
     ESP_LOGI(TAG, "Application main loop started");
+    page_set(PAGE_HOME);
     while (1)
     {
-        // read buttons states
-        bool b1 = gpio_get_level(BUTTON1) == 0;
-        if (b1 != button1_pressed)
-        {
-            if (b1)
-            {
-                ESP_LOGI(TAG, "Button 1 pressed");
-            }
-            else
-            {
-                ESP_LOGI(TAG, "Button 1 released");
-            }
-            button1_pressed = b1;
-        }
-        bool b2 = gpio_get_level(BUTTON2) == 0;
-        if (b2 != button2_pressed)
-        {
-            if (b2)
-            {
-                ESP_LOGI(TAG, "Button 2 pressed");
-            }
-            else
-            {
-                ESP_LOGI(TAG, "Button 2 released");
-            }
-            button2_pressed = b2;
-        }
-        if (button1_pressed || button2_pressed)
-        {
-            action_button();
-        }
-        else if (current_page == PAGE_NONE)
-        {
-            page_set(PAGE_HOME);
-        }
-        // 10 tick delay (100ms)
-        vTaskDelay(10);
+        action_buttons(button_state());
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }

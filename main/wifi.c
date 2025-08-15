@@ -69,7 +69,8 @@ esp_err_t wifi_scan(ap_brief_t *ap_list, uint16_t max_aps, uint16_t *ap_count)
         return err;
     }
 
-     for (uint16_t i = 0; i < *ap_count; i++) {
+    for (uint16_t i = 0; i < *ap_count; i++)
+    {
         ESP_LOGI(TAG, "SSID \t\t%s", ap_info[i].ssid);
         ESP_LOGI(TAG, "RSSI \t\t%d", ap_info[i].rssi);
         strncpy(ap_list[i].ssid, (char *)ap_info[i].ssid, sizeof(ap_list[i].ssid));
