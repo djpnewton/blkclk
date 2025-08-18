@@ -28,9 +28,18 @@ FontxFile fx32L[2];
 
 static ap_brief_t ap_list[10];
 static uint16_t ap_count = 0;
-static int cursor = 0;
+static uint16_t cursor = 0;
+static ap_brief_t selected_ap;
+static char user_entry[64] = {0};
+static uint8_t next_char = 32;
 
 static const char *TAG = "page";
+
+struct pos_t
+{
+    uint16_t x;
+    uint16_t y;
+};
 
 esp_err_t pages_init()
 {
@@ -57,10 +66,43 @@ void drawCursor(uint16_t xc, uint16_t yc, uint16_t w, uint16_t h)
     lcdDrawTriangle(&dev, xc, yc, w, h, 90, RED);
 }
 
+struct pos_t drawStrWrap(FontxFile *fx, uint16_t fontWidth, uint16_t fontHeight, char *str, uint16_t x, uint16_t y, uint16_t maxWidth, uint16_t color)
+{
+    uint16_t len = strlen(str);
+    uint16_t drawnChars = 0;
+    uint16_t xPos = x;
+    uint16_t yPos = y;
+    while (drawnChars < len)
+    {
+        uint16_t charsRemaining = len - drawnChars;
+        uint16_t charsRemainingWidth = charsRemaining * fontWidth;
+        if (charsRemainingWidth <= maxWidth)
+        {
+            lcdDrawString(&dev, fx, x, yPos, (uint8_t *)&str[drawnChars], color);
+            drawnChars += charsRemaining;
+            xPos = x + charsRemainingWidth;
+        }
+        else
+        {
+            uint16_t drawLen = maxWidth / fontWidth;
+            char buf[drawLen];
+            strncpy(buf, &str[drawnChars], drawLen);
+            buf[drawLen] = '\0';
+            lcdDrawString(&dev, fx, x, yPos, (uint8_t *)buf, color);
+            drawnChars += drawLen;
+            xPos = x + drawLen * fontWidth;
+        }
+        yPos += fontHeight;
+    }
+    return (struct pos_t){xPos, yPos};
+}
+
 esp_err_t page_init(enum page_id id)
 {
     ESP_LOGI(TAG, "Initializing page %d", id);
     cursor = 0;
+    memset(user_entry, 0, sizeof(user_entry));
+    next_char = 32; // space character
     return ESP_OK;
 }
 
@@ -123,10 +165,39 @@ esp_err_t page_display(enum page_id id)
             drawCursor(fontHeight / 2, exitTextHeight - fontHeight / 2, fontHeight - 4, fontHeight - 4);
         }
         drawCmdStr(fx, "Exit", fontHeight, exitTextHeight);
-
+        break;
+    case PAGE_WIFI_ENTER_PASSWORD:
+        // Display WiFi password entry page
+        lcdFillScreen(&dev, WHITE);
+        lcdDrawString(&dev, fx, fontHeight / 2, fontHeight * 1 - 1, (unsigned char *)"Enter WiFi", BLACK);
+        lcdDrawString(&dev, fx, fontHeight / 2, fontHeight * 2 - 1, (unsigned char *)"Password:", BLACK);
+        // show current entered password
+        struct pos_t pos = {fontHeight / 2, fontHeight * 4 - 1};
+        if (user_entry[0] != '\0')
+        {
+            pos = drawStrWrap(fx, fontWidth, fontHeight, user_entry, pos.x, pos.y, CONFIG_WIDTH - fontWidth * 4, BLACK);
+        }
+        else
+        {
+            pos.y += fontHeight;
+        }
+        // show next character to be entered
+        if (next_char <= 126)
+        {
+            lcdDrawString(&dev, fx, pos.x, pos.y - fontHeight, (unsigned char *)&next_char, BLACK);
+        }
+        lcdDrawRect(&dev, pos.x, pos.y - fontHeight * 2, pos.x + fontWidth, pos.y - fontHeight, RED);
+        if (next_char == 127)
+        {
+            lcdDrawString(&dev, fx, pos.x + fontWidth, pos.y - fontHeight, (unsigned char *)"<-", RED);
+        }
+        if (next_char == 128)
+        {
+            lcdDrawString(&dev, fx, pos.x + fontWidth, pos.y - fontHeight, (unsigned char *)"->", RED);
+        }
         break;
     default:
-        ESP_LOGE(TAG, "Unknown page ID");
+        ESP_LOGE(TAG, "PD: Unknown page ID: %d", id);
         return ESP_ERR_INVALID_ARG;
     }
     lcdDrawFinish(&dev);
@@ -150,9 +221,44 @@ enum page_action_t page_action(enum page_id id)
             ESP_LOGI(TAG, "Exit wifi list");
             return PAGE_ACTION_EXIT;
         }
+        if (cursor < ap_count)
+        {
+            // Connect to the selected AP
+            ESP_LOGI(TAG, "Set AP to connect: %s", ap_list[cursor].ssid);
+            selected_ap = ap_list[cursor];
+            return PAGE_ACTION_WIFI_AP_SELECT;
+        }
+        ESP_LOGE(TAG, "Invalid cursor position: %d", cursor);
+        break;
+    case PAGE_WIFI_ENTER_PASSWORD:
+        if (next_char == 127)
+        {
+            // Handle backspace
+            if (strlen(user_entry) > 0)
+            {
+                user_entry[strlen(user_entry) - 1] = '\0';
+            }
+        }
+        else if (next_char == 128)
+        {
+            // Handle enter
+            if (strlen(user_entry) > 0)
+            {
+                // Submit the entered password
+                ESP_LOGI(TAG, "Submitting WiFi password: %s", user_entry);
+                return PAGE_ACTION_WIFI_PASSWORD_SUBMIT;
+            }
+        }
+        else if (strlen(user_entry) < sizeof(user_entry) - 1)
+        {
+            // Allow entering the next character
+            user_entry[strlen(user_entry)] = next_char;
+            user_entry[strlen(user_entry) + 1] = '\0';
+        }
+        page_display(id);
         break;
     default:
-        ESP_LOGE(TAG, "Unknown page ID");
+        ESP_LOGE(TAG, "PA: Unknown page ID: %d", id);
         break;
     }
     return PAGE_ACTION_NONE;
@@ -181,8 +287,16 @@ void page_up(enum page_id id)
         ESP_LOGI(TAG, "Cursor moved to %d", cursor);
         page_display(id);
         break;
+    case PAGE_WIFI_ENTER_PASSWORD:
+        next_char--;
+        if (next_char < 32)
+        {
+            next_char = 128;
+        }
+        page_display(id);
+        break;
     default:
-        ESP_LOGE(TAG, "Unknown page ID");
+        ESP_LOGE(TAG, "PU: Unknown page ID: %d", id);
         break;
     }
 }
@@ -210,8 +324,16 @@ void page_down(enum page_id id)
         ESP_LOGI(TAG, "Cursor moved to %d", cursor);
         page_display(id);
         break;
+    case PAGE_WIFI_ENTER_PASSWORD:
+        next_char++;
+        if (next_char > 128)
+        {
+            next_char = 32;
+        }
+        page_display(id);
+        break;
     default:
-        ESP_LOGE(TAG, "Unknown page ID");
+        ESP_LOGE(TAG, "PD: Unknown page ID: %d", id);
         break;
     }
 }

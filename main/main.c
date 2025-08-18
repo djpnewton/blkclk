@@ -176,6 +176,9 @@ void action_buttons(button_state_t bs)
             case PAGE_ACTION_EXIT:
                 page_set(PAGE_HOME);
                 break;
+            case PAGE_ACTION_WIFI_AP_SELECT:
+                page_set(PAGE_WIFI_ENTER_PASSWORD);
+                break;
             default:
                 ESP_LOGE(TAG, "Unknown page action result: %d", action);
                 break;
@@ -190,8 +193,23 @@ void action_buttons(button_state_t bs)
             page_up(current_page);
         }
         break;
+    case PAGE_WIFI_ENTER_PASSWORD:
+        if (bs == BUTTON_BOTH_ACTIVATED)
+        {
+            enum page_action_t action = page_action(current_page);
+            //TODO
+        }
+        else if (bs == BUTTON_1_ACTIVATED)
+        {
+            page_down(current_page);
+        }
+        else if (bs == BUTTON_2_ACTIVATED)
+        {
+            page_up(current_page);
+        }
+        break;
     default:
-        ESP_LOGE(TAG, "Unknown page ID");
+        ESP_LOGE(TAG, "Unknown page ID: %d", current_page);
     }
 }
 

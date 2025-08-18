@@ -10,12 +10,15 @@ enum page_id
     PAGE_WIFI_SCAN,
     PAGE_WIFI_SCAN_FAIL,
     PAGE_WIFI_LIST,
+    PAGE_WIFI_ENTER_PASSWORD,
 };
 
 enum page_action_t
 {
     PAGE_ACTION_NONE,
     PAGE_ACTION_EXIT,
+    PAGE_ACTION_WIFI_AP_SELECT,
+    PAGE_ACTION_WIFI_PASSWORD_SUBMIT,
 };
 
 esp_err_t pages_init();
