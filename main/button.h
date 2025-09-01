@@ -1,5 +1,5 @@
-#ifndef BUTTON_H
-#define BUTTON_H
+#ifndef __BUTTON_H__
+#define __BUTTON_H__
 
 #include <stdbool.h>
 
@@ -20,4 +20,4 @@ typedef enum
 void button_init(void);
 button_state_t button_state(void);
 
-#endif // BUTTON_H
+#endif // __BUTTON_H__

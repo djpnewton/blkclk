@@ -4,6 +4,7 @@
 #include "fontx.h"
 
 #include "wifi.h"
+#include "http.h"
 #include "pages.h"
 
 // You have to set these CONFIG value using menuconfig.
@@ -33,7 +34,7 @@ static ap_brief_t selected_ap;
 static char user_entry[64] = {0};
 static uint8_t next_char = 32;
 
-static const char *TAG = "page";
+static const char *TAG = "PAGE";
 
 struct pos_t
 {
@@ -102,13 +103,14 @@ esp_err_t page_init(enum page_id id)
     ESP_LOGI(TAG, "Initializing page %d", id);
     cursor = 0;
     memset(user_entry, 0, sizeof(user_entry));
-    next_char = 32; // space character
+    memcpy(user_entry, "12345678", 8); // TODO: temporary
+    next_char = 32;                    // space character
     return ESP_OK;
 }
 
 esp_err_t page_display(enum page_id id)
 {
-    uint8_t ascii[50] = {0};
+    esp_err_t err;
     // get font width & height
     FontxFile *fx = fx16G;
     uint8_t fontWidth;
@@ -131,10 +133,10 @@ esp_err_t page_display(enum page_id id)
         ESP_LOGI(TAG, "Displaying WiFi scan page");
         // show scanning screen
         lcdFillScreen(&dev, WHITE);
-        lcdDrawString(&dev, fx, 0, fontHeight * 1 - 1, (unsigned char *)"Scanning WiFi...", BLACK);
+        lcdDrawString(&dev, fx, fontHeight / 2, fontHeight * 2 - 1, (unsigned char *)"Scanning WiFi...", BLACK);
         // scan wifi
         ap_count = 0;
-        esp_err_t err = wifi_scan(ap_list, 10, &ap_count);
+        err = wifi_scan(ap_list, 10, &ap_count);
         if (err != ESP_OK)
         {
             ESP_LOGE(TAG, "Failed to scan WiFi networks");
@@ -142,11 +144,8 @@ esp_err_t page_display(enum page_id id)
         }
         break;
     case PAGE_WIFI_SCAN_FAIL:
-        strcpy((char *)ascii, "Failed to scan");
-        lcdDrawString(&dev, fx, 0, fontHeight * 1 - 1, ascii, BLACK);
-        strcpy((char *)ascii, "WiFi networks");
-        lcdSetFontDirection(&dev, 0);
-        lcdDrawString(&dev, fx, 0, fontHeight * 2 - 1, ascii, BLACK);
+        lcdDrawString(&dev, fx, fontHeight / 2, fontHeight * 2 - 1, (unsigned char *)"Failed to scan", BLACK);
+        lcdDrawString(&dev, fx, fontHeight / 20, fontHeight * 3 - 1, (unsigned char *)"WiFi networks", BLACK);
         break;
     case PAGE_WIFI_LIST:
         // display wifi list
@@ -169,10 +168,10 @@ esp_err_t page_display(enum page_id id)
     case PAGE_WIFI_ENTER_PASSWORD:
         // Display WiFi password entry page
         lcdFillScreen(&dev, WHITE);
-        lcdDrawString(&dev, fx, fontHeight / 2, fontHeight * 1 - 1, (unsigned char *)"Enter WiFi", BLACK);
-        lcdDrawString(&dev, fx, fontHeight / 2, fontHeight * 2 - 1, (unsigned char *)"Password:", BLACK);
+        lcdDrawString(&dev, fx, fontHeight / 2, fontHeight * 2 - 1, (unsigned char *)"Enter WiFi", BLACK);
+        lcdDrawString(&dev, fx, fontHeight / 2, fontHeight * 3 - 1, (unsigned char *)"Password:", BLACK);
         // show current entered password
-        struct pos_t pos = {fontHeight / 2, fontHeight * 4 - 1};
+        struct pos_t pos = {fontHeight / 2, fontHeight * 5 - 1};
         if (user_entry[0] != '\0')
         {
             pos = drawStrWrap(fx, fontWidth, fontHeight, user_entry, pos.x, pos.y, CONFIG_WIDTH - fontWidth * 4, BLACK);
@@ -186,15 +185,94 @@ esp_err_t page_display(enum page_id id)
         {
             lcdDrawString(&dev, fx, pos.x, pos.y - fontHeight, (unsigned char *)&next_char, BLACK);
         }
-        lcdDrawRect(&dev, pos.x, pos.y - fontHeight * 2, pos.x + fontWidth, pos.y - fontHeight, RED);
         if (next_char == 127)
         {
             lcdDrawString(&dev, fx, pos.x + fontWidth, pos.y - fontHeight, (unsigned char *)"<-", RED);
         }
-        if (next_char == 128)
+        else if (next_char == 128)
         {
             lcdDrawString(&dev, fx, pos.x + fontWidth, pos.y - fontHeight, (unsigned char *)"->", RED);
         }
+        else
+        {
+            // draw input box
+            lcdDrawRect(&dev, pos.x, pos.y - fontHeight * 2, pos.x + fontWidth, pos.y - fontHeight, RED);
+        }
+        break;
+    case PAGE_WIFI_CONNECT:
+        lcdFillScreen(&dev, WHITE);
+        lcdDrawString(&dev, fx, fontHeight / 2, fontHeight * 2 - 1, (unsigned char *)"Connecting to", BLACK);
+        lcdDrawString(&dev, fx, fontHeight / 2, fontHeight * 3 - 1, (unsigned char *)"WiFi...", BLACK);
+        // connect wifi
+        err = wifi_connect(selected_ap.ssid, user_entry);
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to connect to WiFi");
+            return err;
+        }
+        break;
+    case PAGE_WIFI_CONNECT_FAIL:
+        lcdFillScreen(&dev, WHITE);
+        lcdDrawString(&dev, fx, fontHeight / 2, fontHeight * 2 - 1, (unsigned char *)"Failed to", BLACK);
+        lcdDrawString(&dev, fx, fontHeight / 2, fontHeight * 3 - 1, (unsigned char *)"connect to WiFi", BLACK);
+        break;
+    case PAGE_WIFI_CONNECTED:
+        lcdFillScreen(&dev, WHITE);
+        lcdDrawString(&dev, fx, fontHeight / 2, fontHeight * 2 - 1, (unsigned char *)"WiFi Connected!", BLACK);
+        break;
+    case PAGE_BLOCKHEIGHT_LOAD:
+        lcdFillScreen(&dev, WHITE);
+        lcdDrawString(&dev, fx, fontHeight / 2, fontHeight * 2 - 1, (unsigned char *)"Loading", BLACK);
+        lcdDrawString(&dev, fx, fontHeight / 2, fontHeight * 2 - 1, (unsigned char *)"Blockheight...", BLACK);
+        // load blockheight
+        char* pem = "-----BEGIN CERTIFICATE-----\n"
+"MIIHXTCCBkWgAwIBAgIQDLRi7sXtOj+bsANd8R2bsjANBgkqhkiG9w0BAQsFADBZ\n"
+"MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMTMwMQYDVQQDEypE\n"
+"aWdpQ2VydCBHbG9iYWwgRzIgVExTIFJTQSBTSEEyNTYgMjAyMCBDQTEwHhcNMjQw\n"
+"OTMwMDAwMDAwWhcNMjUxMDMxMjM1OTU5WjBuMQswCQYDVQQGEwJLWTEUMBIGA1UE\n"
+"BxMLR2VvcmdlIFRvd24xLDAqBgNVBAoTI0Jsb2NrY2hhaW4uY29tIEdyb3VwIEhv\n"
+"bGRpbmdzLCBJbmMuMRswGQYDVQQDExJ3d3cuYmxvY2tjaGFpbi5jb20wggEiMA0G\n"
+"CSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC/9W9WIJYwcWUyCw8E/zDj99fnooE6\n"
+"NcFr++VJwj8qXQOIgY/A+TJqlnkyL9em1KHyxNRRKchkH2o+fZF1k48FA1KhzwlE\n"
+"A5mjajWKhG5LXvQ7qvvLavnzYVp6Sarkl8/qrrlD4Bdbq1Rqusxgspybt/WIxirI\n"
+"HiEDjnYPBEwH/m2KHLpPi16YNbuO3ex51QbcR/1zAwYwvxr3vXA1LO0oHvrhZ15w\n"
+"ppGNmGRevDidIWn/cqgsf/emMo8M0zcZfYfiCNK8jN0hGCFX/LEqbbaX29YrdoAN\n"
+"6++P7qLaKl4HT+6lavUvQwDBeJIBj3WE611JRsEBVqhXRq6OrMXr4RLfAgMBAAGj\n"
+"ggQKMIIEBjAfBgNVHSMEGDAWgBR0hYDAZsffN97PvSk3qgMdvu3NFzAdBgNVHQ4E\n"
+"FgQU8WeHl+Fz+0dxIclf7jPOFyF3R3MwgZcGA1UdEQSBjzCBjIISd3d3LmJsb2Nr\n"
+"Y2hhaW4uY29tgg9ibG9ja2NoYWluLmluZm+CEndzLmJsb2NrY2hhaW4uaW5mb4IT\n"
+"YXBpLmJsb2NrY2hhaW4uaW5mb4IUbG9naW4uYmxvY2tjaGFpbi5jb22CEmFwaS5i\n"
+"bG9ja2NoYWluLmNvbYISYnBzLmJsb2NrY2hhaW4uY29tMD4GA1UdIAQ3MDUwMwYG\n"
+"Z4EMAQICMCkwJwYIKwYBBQUHAgEWG2h0dHA6Ly93d3cuZGlnaWNlcnQuY29tL0NQ\n"
+"UzAOBgNVHQ8BAf8EBAMCBaAwHQYDVR0lBBYwFAYIKwYBBQUHAwEGCCsGAQUFBwMC\n"
+"MIGfBgNVHR8EgZcwgZQwSKBGoESGQmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9E\n"
+"aWdpQ2VydEdsb2JhbEcyVExTUlNBU0hBMjU2MjAyMENBMS0xLmNybDBIoEagRIZC\n"
+"aHR0cDovL2NybDQuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0R2xvYmFsRzJUTFNSU0FT\n"
+"SEEyNTYyMDIwQ0ExLTEuY3JsMIGHBggrBgEFBQcBAQR7MHkwJAYIKwYBBQUHMAGG\n"
+"GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBRBggrBgEFBQcwAoZFaHR0cDovL2Nh\n"
+"Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0R2xvYmFsRzJUTFNSU0FTSEEyNTYy\n"
+"MDIwQ0ExLTEuY3J0MAwGA1UdEwEB/wQCMAAwggF/BgorBgEEAdZ5AgQCBIIBbwSC\n"
+"AWsBaQB3ABLxTjS9U3JMhAYZw48/ehP457Vih4icbTAFhOvlhiY6AAABkkM3ux4A\n"
+"AAQDAEgwRgIhAMmPQm7SI673YiBIarjNr2ATOBt7j7bQrG7q64VtC+TZAiEAlcQM\n"
+"d0fTcnaox9qQQIWC+hjqD7U6TW6ERBGkNhI5UC4AdwDm0jFjQHeMwRBBBtdxuc7B\n"
+"0kD2loSG+7qHMh39HjeOUAAAAZJDN7rjAAAEAwBIMEYCIQCL5SB25QfAQDZ2Qa9N\n"
+"QkLwDIHAP55SC0cAKZt7//s6WgIhAK3TlInU3Zwo/Q3hiO+4uOkUuNB+tcPE4Byr\n"
+"8xHV5Bt5AHUAzPsPaoVxCWX+lZtTzumyfCLphVwNl422qX5UwP5MDbAAAAGSQze6\n"
+"wQAABAMARjBEAiBCcq56QDZ8tzGYlCwn6f12WwWAC7A+OgS6+GLJn1V37QIgNha+\n"
+"FjFT3scZ6u1rxCoaQEy9OjVDz0EWyGskrKoe14cwDQYJKoZIhvcNAQELBQADggEB\n"
+"ALB4nYGFWirFDPSB77qMSl3lCstOcois//cJZXvMTQul3nu6qVQpV2VrC0YKv9a1\n"
+"NjWkrAEcutA2plgCFGVeRCbbH8yVx6igi5CYcXtOYs9a6QN2Xhcf8dqzQINZUXD6\n"
+"QrDn1eUVe1bQKdKYerSnI1QEy3F72WaDYcPR4wDUSkcaJIzZ9aM4N3wVHdclRx00\n"
+"0a3FRQn2o4nHZAmJbkbXp4EToblyG5msk6y7AoWisz5hPdI3PNI8thqiGgAglF6A\n"
+"vUSH///90MsXgisA5E0/zB6cCtwWFwwNGdN5aqLGW43OO9zjXcfL/i5KFzGOZMZa\n"
+"7F56VFXLFtWybz7AwFDTYpM=\n"
+"-----END CERTIFICATE-----";
+        http_get_url("https://blockchain.info/q/getblockcount", pem);
+        break;
+    case PAGE_BLOCKHEIGHT:
+        lcdFillScreen(&dev, WHITE);
+        lcdDrawString(&dev, fx, fontHeight / 2, fontHeight * 2 - 1, (unsigned char *)"Blockheight:", BLACK);
+        lcdDrawString(&dev, fx, fontHeight / 2, fontHeight * 3 - 1, (unsigned char *)"0", BLACK);
         break;
     default:
         ESP_LOGE(TAG, "PD: Unknown page ID: %d", id);

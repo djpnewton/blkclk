@@ -9,6 +9,7 @@
 #include "esp_spiffs.h"
 #include "nvs_flash.h"
 
+#include "wifi.h"
 #include "pages.h"
 #include "button.h"
 
@@ -180,7 +181,7 @@ void action_buttons(button_state_t bs)
                 page_set(PAGE_WIFI_ENTER_PASSWORD);
                 break;
             default:
-                ESP_LOGE(TAG, "Unknown page action result: %d", action);
+                ESP_LOGE(TAG, "Unknown page action: %d", action);
                 break;
             }
         }
@@ -197,7 +198,27 @@ void action_buttons(button_state_t bs)
         if (bs == BUTTON_BOTH_ACTIVATED)
         {
             enum page_action_t action = page_action(current_page);
-            //TODO
+            switch (action)
+            {
+            case PAGE_ACTION_NONE:
+                break;
+            case PAGE_ACTION_WIFI_PASSWORD_SUBMIT:
+            {
+                esp_err_t err = page_set(PAGE_WIFI_CONNECT);
+                if (err != ESP_OK)
+                {
+                    page_set(PAGE_WIFI_CONNECT_FAIL);
+                }
+                else
+                {
+                    page_set(PAGE_WIFI_CONNECTED);
+                }
+            }
+            break;
+            default:
+                ESP_LOGE(TAG, "Unknown page action: %d", action);
+                break;
+            }
         }
         else if (bs == BUTTON_1_ACTIVATED)
         {
@@ -208,6 +229,15 @@ void action_buttons(button_state_t bs)
             page_up(current_page);
         }
         break;
+        case PAGE_WIFI_CONNECT:
+        case PAGE_WIFI_CONNECT_FAIL:
+            break;
+        case PAGE_WIFI_CONNECTED:
+            if (bs == BUTTON_1_ACTIVATED || bs == BUTTON_2_ACTIVATED || bs == BUTTON_BOTH_ACTIVATED)
+            {
+                page_set(PAGE_BLOCKHEIGHT_LOAD);
+            }
+            break;
     default:
         ESP_LOGE(TAG, "Unknown page ID: %d", current_page);
     }
@@ -223,6 +253,8 @@ void app_main(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+    // wifi init
+    wifi_init();
     // pages init
     pages_init();
     // setup SPIFFS
